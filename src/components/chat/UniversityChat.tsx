@@ -483,6 +483,10 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
             >
               <Menu className="w-5 h-5 text-stone-300 hover:text-white" />
             </button>
+
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1.5 shadow-sm">
+              <VortexLogo size="xs" showText={false} />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -620,7 +624,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                           <div className="flex items-center gap-3 mt-2.5 pt-1 text-xs text-stone-400">
                             <button
                               onClick={() => handleCopyMessage(msg.content, index)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-[11px]"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-0"
                               title="Copy full answer"
                             >
                               {copiedMessageIndex === index ? (
@@ -640,7 +644,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                             <button
                               type="button"
                               onClick={() => toggleReadAloud(msg.content, index)}
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0 ${
                                 speakingIndex === index
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                                   : 'text-stone-400 hover:text-white hover:bg-white/10'
@@ -670,7 +674,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                                     onSendMessage(lastUserMsg.content);
                                   }
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-amber-100 transition-colors cursor-pointer shadow-xs active:scale-95"
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-amber-100 transition-colors cursor-pointer shadow-xs active:scale-95 focus-visible:outline-none focus-visible:ring-0"
                                 title="Re-query EduMind AI live engines"
                               >
                                 <Sparkles className="w-3 h-3 text-amber-400" />
