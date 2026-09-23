@@ -207,7 +207,7 @@ export async function getUserByEmail(email: string): Promise<UserRecord | null> 
         .eq("email", normalizedEmail)
         .maybeSingle();
 
-      const { data, error } = await withTimeout(Promise.resolve(query), 2000);
+      const { data, error } = await withTimeout(Promise.resolve(query), 750);
 
       if (!error && data) {
         const record: UserRecord = {

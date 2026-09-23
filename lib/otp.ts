@@ -115,14 +115,12 @@ export async function createAndSendOtp(
   console.log(`[AUTH OTP] ⏳ Valid for 10 minutes until: ${new Date(expiresAt).toLocaleTimeString()}`);
   console.log(`======================================================\n`);
 
-  // Attempt real email dispatch if SMTP is configured
+  // Dispatch email in the background so a slow SMTP server cannot block signup.
   const transporter = getMailTransporter();
-  let emailSent = false;
 
   if (transporter) {
-    try {
-      const sender = process.env.EMAIL_FROM || process.env.SMTP_USER || "noreply@edumind.ng";
-      await transporter.sendMail({
+    const sender = process.env.EMAIL_FROM || process.env.SMTP_USER || "noreply@edumind.ng";
+    void transporter.sendMail({
         from: `"EduMind AI" <${sender}>`,
         to: cleanEmail,
         subject: `${code} is your EduMind AI verification code`,
@@ -145,20 +143,17 @@ export async function createAndSendOtp(
             <p style="color: #52525b; font-size: 11px; margin-top: 24px;">© ${new Date().getFullYear()} EduMind AI Academic Intelligence Platform</p>
           </div>
         `,
+      }).then(() => {
+        console.log(`[AUTH OTP] ✅ Email successfully delivered to ${cleanEmail}`);
+      }).catch((mailErr) => {
+        console.warn(`[AUTH OTP] ⚠️ SMTP delivery failed; use the displayed OTP fallback:`, mailErr);
       });
-      emailSent = true;
-      console.log(`[AUTH OTP] ✅ Email successfully delivered to ${cleanEmail}`);
-    } catch (mailErr) {
-      console.warn(`[AUTH OTP] ⚠️ SMTP delivery failed, falling back to instant code:`, mailErr);
-    }
   }
 
   return {
     success: true,
     previewOtp: code,
-    message: emailSent
-      ? `Verification code sent to ${cleanEmail}`
-      : `Verification code generated for ${cleanEmail}`,
+    message: `Verification code generated for ${cleanEmail}`,
     expiresInSeconds: 600,
   };
 }

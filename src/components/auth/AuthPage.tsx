@@ -289,6 +289,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
     try {
       const res = await fetch('/api/signup', {
@@ -302,6 +304,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
           classYear,
           course,
         }),
+        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -330,8 +333,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       localStorage.setItem('vortex_token', data.token);
       setOnboardingUser(data.user);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Signup failed');
+      setErrorMsg(err.name === 'AbortError'
+        ? 'Signup is taking too long. Please check your connection and try again.'
+        : (err.message || 'Signup failed'));
     } finally {
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   };
