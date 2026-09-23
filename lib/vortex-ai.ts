@@ -110,12 +110,14 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
     }
   }
 
-  // Modern model cascade: primary gemini-3.6-flash -> fast gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
+  // Modern model cascade with safer fallback coverage. We intentionally avoid brittle model names
+  // and keep a wider set so the app can absorb temporary upstream spikes without stalling.
   const primaryModels = [
-    "gemini-3.6-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
   ];
 
   let lastError: any = null;

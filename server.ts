@@ -15,8 +15,11 @@ import { processFile, getRelevantChunks, globalChunks } from "./lib/rag.ts";
 import { vortexBrain, cleanAiResponse } from "./lib/vortex-ai.ts";
 import { validateFileUpload, validateExtractedText, validateChatPrompt } from "./lib/content-safety.ts";
 import { verifyAiResponse } from "./lib/verification.ts";
+import { createRequestQueue } from "./lib/request-queue.ts";
 
 dotenv.config();
+
+const requestQueue = createRequestQueue(8, 120);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -946,17 +949,19 @@ async function startServer() {
 
       let aiText = "";
       try {
-        aiText = await vortexBrain({
-          message: cleanMessage,
-          educationLevel: finalEducationLevel,
-          classYear: finalClassYear,
-          course: finalCourse,
-          ragContext,
-          history,
-          image: hasImage ? image : null,
-          theme: finalTheme,
+        aiText = await requestQueue.enqueue(async () => {
+          const response = await vortexBrain({
+            message: cleanMessage,
+            educationLevel: finalEducationLevel,
+            classYear: finalClassYear,
+            course: finalCourse,
+            ragContext,
+            history,
+            image: hasImage ? image : null,
+            theme: finalTheme,
+          });
+          return cleanAiResponse(response);
         });
-        aiText = cleanAiResponse(aiText);
       } catch (aiErr: any) {
         console.error("vortexBrain error:", aiErr);
         return res.status(500).json({
