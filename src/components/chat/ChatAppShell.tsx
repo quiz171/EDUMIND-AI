@@ -321,7 +321,16 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
         }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any = {};
+
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error('EduMind AI returned an unexpected server page. Please refresh and try again.');
+        }
+      }
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to communicate with EduMind AI');
