@@ -110,14 +110,13 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
     }
   }
 
-  // Modern model cascade with safer fallback coverage. We intentionally avoid brittle model names
-  // and keep a wider set so the app can absorb temporary upstream spikes without stalling.
+  // Keep the model list to versions currently supported by the Google GenAI API.
+  // Some older or alpha model names can return 404 / NOT_FOUND, which should not hard-fail the chat flow.
   const primaryModels = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
   ];
 
   let lastError: any = null;
@@ -182,14 +181,15 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
           lastError = err;
           const errMsg = err?.message || String(err);
           
-          // If error is 503, 429 or high demand, failover to next model
+          // If error is 503, 429, high demand, or a temporarily unavailable model, failover to next model.
           const isDemandIssue = errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("429") || errMsg.includes("UNAVAILABLE");
+          const isModelNotFoundIssue = errMsg.includes("404") || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("unsupported");
+
           if (isDemandIssue) {
-            // Model experiencing demand spike, failover smoothly
             await sleep(400);
-            break; // Proceed immediately to next model in cascade
-          } else if (errMsg.includes("400") || errMsg.includes("invalid") || errMsg.includes("404")) {
-            // Deprecated or invalid model identifier, move to next model
+            break;
+          } else if (errMsg.includes("400") || errMsg.includes("invalid") || isModelNotFoundIssue) {
+            await sleep(250);
             break;
           }
         }
@@ -202,14 +202,18 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
   // 3. Resilient Academic Engine Fallback
   // If Google AI Cloud is experiencing temporary upstream 503 high-demand spikes,
   // never let the student encounter a dead screen. Synthesize a structured academic solution.
-  const is503OrSpike = lastError?.message && (
-    lastError.message.includes("503") ||
-    lastError.message.includes("high demand") ||
-    lastError.message.includes("Service Unavailable") ||
-    lastError.message.includes("temporarily unavailable")
-  );
+  const lastErrorMessage = lastError?.message ? String(lastError.message) : "";
+  const is503OrSpike = lastErrorMessage.includes("503") ||
+    lastErrorMessage.includes("high demand") ||
+    lastErrorMessage.includes("Service Unavailable") ||
+    lastErrorMessage.includes("temporarily unavailable");
+  const isModelAvailabilityIssue = lastErrorMessage.includes("404") ||
+    lastErrorMessage.includes("NOT_FOUND") ||
+    lastErrorMessage.includes("not found") ||
+    lastErrorMessage.includes("unsupported") ||
+    lastErrorMessage.includes("model is not found");
 
-  if (is503OrSpike || !lastError) {
+  if (is503OrSpike || isModelAvailabilityIssue || !lastError) {
     return cleanAiResponse(generateCurricularFallbackSolution({
       query: promptText,
       educationLevel,
