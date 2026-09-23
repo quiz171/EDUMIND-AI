@@ -889,16 +889,6 @@ async function startServer() {
 </html>`);
   });
 
-  // API not found guard: prevent HTML fallback pages from being returned on missing API endpoints
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith("/api")) {
-      return res.status(404).json({
-        error: `API endpoint not found: ${req.method} ${req.path}`,
-      });
-    }
-    next();
-  });
-
   // 4. Chat Route (Protected)
   app.post("/api/chat", async (req: Request, res: Response) => {
     try {
@@ -1165,6 +1155,16 @@ async function startServer() {
       console.error("Profile update error:", err);
       return res.status(500).json({ error: err?.message || "Failed to update student profile" });
     }
+  });
+
+  // API not found guard: only after all real API endpoints are registered
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith("/api")) {
+      return res.status(404).json({
+        error: `API endpoint not found: ${req.method} ${req.path}`,
+      });
+    }
+    next();
   });
 
   // Vite middleware for development & static serving for production
