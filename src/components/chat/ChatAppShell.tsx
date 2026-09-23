@@ -267,7 +267,8 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
     currentUser: User,
     currentToken: string,
     currentDoc: RagDocument | null = activeDoc,
-    image?: { data: string; mimeType: string } | null
+    image?: { data: string; mimeType: string } | null,
+    retryCount: number = 0
   ) => {
     if (!text.trim() && !image) return;
 
@@ -346,6 +347,15 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
       }
       const rawMsg = err.message || '';
       const isDemandError = rawMsg.includes('503') || rawMsg.includes('demand') || rawMsg.includes('Unavailable');
+
+      if (isDemandError && retryCount < 2) {
+        setIsThinking(true);
+        setTimeout(() => {
+          handleSendMessageWithUser(text, currentUser, currentToken, currentDoc, image, retryCount + 1);
+        }, 4000);
+        return;
+      }
+
       const friendlyNotice = isDemandError
         ? `⚠️ **Notice**: Google AI servers are experiencing temporary high demand spikes. EduMind AI is ready to re-query your question with 1 click.`
         : `⚠️ **Notice**: ${rawMsg || 'Failed to receive reply.'}\n\nPlease try asking again.`;
