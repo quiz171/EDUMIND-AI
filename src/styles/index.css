@@ -43,16 +43,6 @@ html, body {
   color: var(--v-text-primary);
 }
 
-button:focus-visible,
-a:focus-visible,
-textarea:focus-visible,
-input:focus-visible,
-[role='button']:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-  ring: unset !important;
-}
-
 /* Custom Text Selection */
 ::selection {
   background: var(--v-accent-glow);

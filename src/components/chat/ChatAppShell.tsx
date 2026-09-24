@@ -56,32 +56,10 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
     messagesRef.current = messages;
   }, [messages]);
 
-  // When a user leaves the site/app and returns, reset to a fresh new chat session
+  // Messages ref for ongoing state tracking
   useEffect(() => {
-    let leaveTimestamp: number | null = null;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        leaveTimestamp = Date.now();
-      } else if (document.visibilityState === 'visible' && leaveTimestamp) {
-        const awayDuration = Date.now() - leaveTimestamp;
-        leaveTimestamp = null;
-        // If the user left the app and returns, start with a new chat
-        if (awayDuration > 4000 && messagesRef.current.length > 0) {
-          const freshId = `session_${Date.now()}`;
-          setCurrentSessionId(freshId);
-          setMessages([]);
-          setActiveDoc(null);
-          setErrorMessage(null);
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
+    messagesRef.current = messages;
+  }, [messages]);
 
   // Load user, token, background theme and session history from localStorage
   useEffect(() => {
@@ -124,20 +102,34 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
         }
       }
 
-      // Always start with a clean new chat when returning to or loading the site/app
-      const freshId = `session_${Date.now()}`;
-      setCurrentSessionId(freshId);
-      setMessages([]);
-      setActiveDoc(null);
-
       // Check for any initial prompt set by landing page prompt cards
       const initialPrompt = localStorage.getItem('edumind_initial_prompt') || localStorage.getItem('vortex_initial_prompt');
       if (initialPrompt) {
         localStorage.removeItem('edumind_initial_prompt');
         localStorage.removeItem('vortex_initial_prompt');
+        const freshId = `session_${Date.now()}`;
+        setCurrentSessionId(freshId);
+        setMessages([]);
+        setActiveDoc(null);
         setTimeout(() => {
           handleSendMessageWithUser(initialPrompt, parsedUser, storedToken);
         }, 400);
+        return;
+      }
+
+      // Resume last active session if exists, or latest session, otherwise start a fresh session
+      const lastSessionId = localStorage.getItem(`edumind_last_session_${parsedUser.email}`);
+      const sessionToResume = parsedSessions.find((s) => s.id === lastSessionId) || parsedSessions[0];
+
+      if (sessionToResume && sessionToResume.messages && sessionToResume.messages.length > 0) {
+        setCurrentSessionId(sessionToResume.id);
+        setMessages(sessionToResume.messages);
+        setActiveDoc(sessionToResume.activeDoc || null);
+      } else {
+        const freshId = `session_${Date.now()}`;
+        setCurrentSessionId(freshId);
+        setMessages([]);
+        setActiveDoc(null);
       }
     } catch (e) {
       onNavigate('/sign-up-login-screen');
@@ -186,6 +178,7 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
 
       try {
         localStorage.setItem(`edumind_sessions_${currentUser.email}`, JSON.stringify(updated));
+        localStorage.setItem(`edumind_last_session_${currentUser.email}`, sessionId);
       } catch (err) {
         console.warn('Failed to persist chat sessions:', err);
       }
@@ -201,6 +194,13 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
       setMessages(found.messages || []);
       setActiveDoc(found.activeDoc || null);
       setErrorMessage(null);
+      if (user) {
+        try {
+          localStorage.setItem(`edumind_last_session_${user.email}`, found.id);
+        } catch {
+          // ignore
+        }
+      }
     }
   };
 
@@ -216,10 +216,27 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
     }
 
     if (currentSessionId === sessionId) {
-      const newId = `session_${Date.now()}`;
-      setCurrentSessionId(newId);
-      setMessages([]);
-      setActiveDoc(null);
+      const remaining = updated[0];
+      if (remaining) {
+        setCurrentSessionId(remaining.id);
+        setMessages(remaining.messages || []);
+        setActiveDoc(remaining.activeDoc || null);
+        try {
+          localStorage.setItem(`edumind_last_session_${user.email}`, remaining.id);
+        } catch {
+          // ignore
+        }
+      } else {
+        const newId = `session_${Date.now()}`;
+        setCurrentSessionId(newId);
+        setMessages([]);
+        setActiveDoc(null);
+        try {
+          localStorage.setItem(`edumind_last_session_${user.email}`, newId);
+        } catch {
+          // ignore
+        }
+      }
     }
   };
 
@@ -229,6 +246,13 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
     setMessages([]);
     setActiveDoc(null);
     setErrorMessage(null);
+    if (user) {
+      try {
+        localStorage.setItem(`edumind_last_session_${user.email}`, newId);
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const handleUpdateUser = (updatedUser: User) => {
@@ -267,8 +291,7 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
     currentUser: User,
     currentToken: string,
     currentDoc: RagDocument | null = activeDoc,
-    image?: { data: string; mimeType: string } | null,
-    retryCount: number = 0
+    image?: { data: string; mimeType: string } | null
   ) => {
     if (!text.trim() && !image) return;
 
@@ -321,16 +344,7 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
         }),
       });
 
-      const responseText = await response.text();
-      let data: any = {};
-
-      if (responseText) {
-        try {
-          data = JSON.parse(responseText);
-        } catch {
-          throw new Error('EduMind AI returned an unexpected server page. Please refresh and try again.');
-        }
-      }
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to communicate with EduMind AI');
@@ -356,15 +370,6 @@ export const ChatAppShell: React.FC<ChatAppShellProps> = ({ onNavigate }) => {
       }
       const rawMsg = err.message || '';
       const isDemandError = rawMsg.includes('503') || rawMsg.includes('demand') || rawMsg.includes('Unavailable');
-
-      if (isDemandError && retryCount < 2) {
-        setIsThinking(true);
-        setTimeout(() => {
-          handleSendMessageWithUser(text, currentUser, currentToken, currentDoc, image, retryCount + 1);
-        }, 4000);
-        return;
-      }
-
       const friendlyNotice = isDemandError
         ? `⚠️ **Notice**: Google AI servers are experiencing temporary high demand spikes. EduMind AI is ready to re-query your question with 1 click.`
         : `⚠️ **Notice**: ${rawMsg || 'Failed to receive reply.'}\n\nPlease try asking again.`;

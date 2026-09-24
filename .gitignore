@@ -1,6 +1,4 @@
 node_modules/
-.tools/
-.data/
 build/
 dist/
 .next/

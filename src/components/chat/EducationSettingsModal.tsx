@@ -22,6 +22,9 @@ import {
   Flame,
   MessageSquare,
   FileText,
+  Star,
+  Send,
+  CheckCircle2,
 } from 'lucide-react';
 import { User, RagDocument } from '../../types';
 import { BACKGROUND_THEMES, THEME_CATEGORIES, BackgroundTheme } from '../../lib/theme';
@@ -36,7 +39,7 @@ interface EducationSettingsModalProps {
   onSelectTheme?: (themeId: string) => void;
   sessionsCount?: number;
   activeDoc?: RagDocument | null;
-  defaultTab?: 'profile' | 'academic' | 'model' | 'appearance' | 'preferences' | 'account';
+  defaultTab?: 'profile' | 'academic' | 'model' | 'appearance' | 'preferences' | 'feedback' | 'account';
 }
 
 export const EDUCATION_LEVELS = [
@@ -103,7 +106,7 @@ export const EducationSettingsModal: React.FC<EducationSettingsModalProps> = ({
   activeDoc = null,
   defaultTab = 'profile',
 }) => {
-  const [activeNav, setActiveNav] = useState<'profile' | 'academic' | 'model' | 'appearance' | 'preferences' | 'account'>(defaultTab);
+  const [activeNav, setActiveNav] = useState<'profile' | 'academic' | 'model' | 'appearance' | 'preferences' | 'feedback' | 'account'>(defaultTab);
   const [selectedLevel, setSelectedLevel] = useState<string>(currentUser.educationLevel || 'University');
   const [selectedYear, setSelectedYear] = useState<string>(currentUser.classYear || '100L / Year 1');
   const [course, setCourse] = useState<string>(currentUser.course || 'Computer Science');
@@ -114,6 +117,55 @@ export const EducationSettingsModal: React.FC<EducationSettingsModalProps> = ({
   const [enableVoiceTutor, setEnableVoiceTutor] = useState<boolean>(true);
   const [isSaved, setIsSaved] = useState<boolean>(false);
   const [appearanceCategory, setAppearanceCategory] = useState<string>('all');
+
+  // Feedback State
+  const [feedbackRating, setFeedbackRating] = useState<number>(5);
+  const [feedbackCategory, setFeedbackCategory] = useState<string>('General Feedback');
+  const [feedbackMessage, setFeedbackMessage] = useState<string>('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState<boolean>(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState<boolean>(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+
+  const handleSubmitFeedback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedbackMessage.trim()) {
+      setFeedbackError('Please enter your feedback or comments.');
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    setFeedbackError(null);
+
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rating: feedbackRating,
+          category: feedbackCategory,
+          message: feedbackMessage.trim(),
+          fullName: fullName || currentUser.fullName || 'Student',
+          email: currentUser.email || 'student@edumind.app',
+          userId: currentUser.id || 'guest',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to submit feedback');
+      }
+
+      setFeedbackSuccess(true);
+      setFeedbackMessage('');
+      setTimeout(() => {
+        setFeedbackSuccess(false);
+      }, 5000);
+    } catch (err: any) {
+      setFeedbackError(err.message || 'Error sending feedback. Please try again.');
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     if (isOpen && currentUser) {
@@ -203,6 +255,7 @@ export const EducationSettingsModal: React.FC<EducationSettingsModalProps> = ({
               { id: 'model', label: 'AI & Exam Vision', icon: Cpu },
               { id: 'appearance', label: 'Appearance & Theme', icon: Palette },
               { id: 'preferences', label: 'Voice & Audio', icon: Volume2 },
+              { id: 'feedback', label: 'Site Feedback', icon: MessageSquare },
               { id: 'account', label: 'Account & Sign Out', icon: Shield },
             ].map((item) => {
               const Icon = item.icon;
@@ -738,6 +791,130 @@ export const EducationSettingsModal: React.FC<EducationSettingsModalProps> = ({
                   </div>
                   <span className="text-[11px] font-mono text-emerald-400">Active</span>
                 </div>
+              </div>
+            )}
+
+            {/* Site Feedback Tab */}
+            {activeNav === 'feedback' && (
+              <div className="space-y-4 max-w-xl animate-in fade-in-50 duration-200">
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 space-y-1.5">
+                  <div className="flex items-center gap-2 text-white font-bold text-sm">
+                    <MessageSquare className="w-4 h-4 text-emerald-400" />
+                    <span>Share Your Feedback</span>
+                  </div>
+                  <p className="text-xs text-stone-400 leading-relaxed">
+                    Help us improve EduMind AI. Your comments, feature requests, or bug reports go straight to our administrative dashboard and engineering team.
+                  </p>
+                </div>
+
+                {feedbackSuccess && (
+                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2.5 animate-in fade-in">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Thank you! Your feedback has been received and sent to the team.</span>
+                  </div>
+                )}
+
+                {feedbackError && (
+                  <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">
+                    {feedbackError}
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmitFeedback} className="space-y-4">
+                  {/* Rating Stars */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-stone-300 block">How satisfied are you with the platform?</label>
+                    <div className="flex items-center gap-1.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setFeedbackRating(star)}
+                          className="p-1 text-stone-600 hover:text-amber-400 transition-colors cursor-pointer"
+                        >
+                          <Star
+                            className={`w-6 h-6 transition-all ${
+                              star <= feedbackRating
+                                ? 'text-amber-400 fill-amber-400 scale-105'
+                                : 'text-stone-600'
+                            }`}
+                          />
+                        </button>
+                      ))}
+                      <span className="ml-2 text-xs font-medium text-stone-400">
+                        {feedbackRating === 5
+                          ? 'Excellent (5/5)'
+                          : feedbackRating === 4
+                          ? 'Very Good (4/5)'
+                          : feedbackRating === 3
+                          ? 'Average (3/5)'
+                          : feedbackRating === 2
+                          ? 'Needs Improvement (2/5)'
+                          : 'Poor (1/5)'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Feedback Category */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-stone-300 block">Feedback Category</label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        'General Feedback',
+                        'Feature Request',
+                        'Bug Report',
+                        'Exam / Curriculum',
+                        'Speed & Accuracy',
+                        'User Interface',
+                      ].map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setFeedbackCategory(cat)}
+                          className={`px-3 py-2 rounded-xl text-xs font-medium border text-left transition-all cursor-pointer ${
+                            feedbackCategory === cat
+                              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold'
+                              : 'bg-white/[0.02] border-white/10 text-stone-400 hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Message Input */}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-stone-300 block">Your Comments or Suggestions</label>
+                    <textarea
+                      rows={4}
+                      value={feedbackMessage}
+                      onChange={(e) => setFeedbackMessage(e.target.value)}
+                      placeholder="Tell us what you love or what we should add/fix..."
+                      className="w-full bg-[#1c1c1c] border border-white/10 rounded-xl p-3 text-xs sm:text-sm text-white placeholder:text-stone-500 focus:outline-none focus:border-emerald-500 transition-colors resize-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <p className="text-[11px] text-stone-500">
+                      Submitting as <span className="text-stone-300 font-medium">{currentUser.fullName || currentUser.email}</span>
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={feedbackSubmitting || !feedbackMessage.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {feedbackSubmitting ? (
+                        <span>Sending...</span>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Submit Feedback</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
               </div>
             )}
 

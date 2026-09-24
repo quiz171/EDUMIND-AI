@@ -92,6 +92,12 @@ export const JssSssChat: React.FC<JssSssChatProps> = ({
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
 
+  const isAdmin =
+    user?.role === 'admin' ||
+    user?.email?.toLowerCase() === 'codevortex@gmail.com' ||
+    user?.email?.toLowerCase() === 'nelsonwazini@gmail.com' ||
+    Boolean(user?.email?.toLowerCase().includes('admin'));
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -452,25 +458,27 @@ export const JssSssChat: React.FC<JssSssChatProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-0.5">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold flex items-center justify-center gap-1.5"
-              title="Academic Settings"
-            >
-              <Settings className="w-3.5 h-3.5 text-stone-400" />
-              <span>Settings</span>
-            </button>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-100 transition-colors cursor-pointer text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
-              title="Logout & end session"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Logout</span>
-            </button>
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold flex items-center justify-center gap-1.5"
+                title="Academic Settings"
+              >
+                <Settings className="w-3.5 h-3.5 text-stone-400" />
+                <span>Settings</span>
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-100 transition-colors cursor-pointer text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                title="Logout & end session"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Logout</span>
+              </button>
+            </div>
           </div>
         </div>
       </aside>

@@ -78,9 +78,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
-  // Onboarding modal state
-  const [onboardingUser, setOnboardingUser] = useState<User | null>(null);
-
   // Google Academic Setup Modal state (select class, course & level after Google sign up)
   const [googleSetupData, setGoogleSetupData] = useState<{
     user: User;
@@ -263,7 +260,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       localStorage.setItem('edumind_user', JSON.stringify(updatedUser));
       localStorage.setItem('vortex_user', JSON.stringify(updatedUser));
       setGoogleSetupData(null);
-      setOnboardingUser(updatedUser);
+      onNavigate('/chat-app');
     } catch (err: any) {
       const fallbackUser: User = {
         ...googleSetupData.user,
@@ -274,7 +271,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       localStorage.setItem('edumind_user', JSON.stringify(fallbackUser));
       localStorage.setItem('vortex_user', JSON.stringify(fallbackUser));
       setGoogleSetupData(null);
-      setOnboardingUser(fallbackUser);
+      onNavigate('/chat-app');
     } finally {
       setSetupSaving(false);
     }
@@ -289,8 +286,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
 
     try {
       const res = await fetch('/api/signup', {
@@ -304,7 +299,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
           classYear,
           course,
         }),
-        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -317,7 +311,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       if (data.requiresOtp) {
         setOtpStep(true);
         setOtpEmail(data.email || email.toLowerCase().trim());
-        setPreviewOtp(data.previewOtp || null);
+        setPreviewOtp(null);
         setOtpCode('');
         setOtpStatus('idle');
         setOtpResendTimer(30);
@@ -331,13 +325,11 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       localStorage.setItem('edumind_token', data.token);
       localStorage.setItem('vortex_user', JSON.stringify(data.user));
       localStorage.setItem('vortex_token', data.token);
-      setOnboardingUser(data.user);
+
+      onNavigate('/chat-app');
     } catch (err: any) {
-      setErrorMsg(err.name === 'AbortError'
-        ? 'Signup is taking too long. Please check your connection and try again.'
-        : (err.message || 'Signup failed'));
+      setErrorMsg(err.message || 'Signup failed');
     } finally {
-      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -375,12 +367,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       localStorage.setItem('vortex_token', data.token);
 
       setOtpStatus('success');
-      setOtpSuccessMsg('Email verified successfully! Welcome to EduMind AI.');
+      setOtpSuccessMsg('Email verified successfully! Connecting to AI assistant...');
 
       setTimeout(() => {
         setOtpStep(false);
-        setOnboardingUser(data.user);
-      }, 500);
+        onNavigate('/chat-app');
+      }, 300);
     } catch (err: any) {
       setOtpStatus('error');
       setOtpErrorMsg(err.message || 'Verification failed. Please check the code.');
@@ -405,7 +397,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
         throw new Error(data.error || 'Failed to resend code');
       }
 
-      setPreviewOtp(data.previewOtp || null);
+      setPreviewOtp(null);
       setOtpCode('');
       setOtpStatus('idle');
       setOtpResendTimer(30);
@@ -816,7 +808,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
                 <div className="w-5 h-5 border-2 border-black border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
-                  <span>Get Started</span>
+                  <span>Send Verification Code</span>
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -878,40 +870,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigate }) => {
       </>
     )}
   </div>
-
-      {/* Onboarding Celebration Modal */}
-      {onboardingUser && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="glass-panel border border-emerald-500/40 p-8 rounded-3xl max-w-sm w-full text-center space-y-5 animate-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center mx-auto text-emerald-400">
-              <Sparkles className="w-8 h-8" />
-            </div>
-
-            <div className="space-y-1.5">
-              <h3 className="text-xl font-bold text-white">
-                Hi {onboardingUser.fullName}! 🎉
-              </h3>
-              <p className="text-xs text-stone-300">
-                Your AI Assistant tailored for <strong className="text-emerald-400">{onboardingUser.educationLevel} ({onboardingUser.classYear})</strong> is primed and ready!
-              </p>
-            </div>
-
-            <div className="p-3 bg-white/5 rounded-2xl border border-white/10 text-left text-xs space-y-1">
-              <div className="text-stone-400">Curriculum Target:</div>
-              <div className="font-semibold text-white">
-                {onboardingUser.course} • {onboardingUser.classYear}
-              </div>
-            </div>
-
-            <button
-              onClick={() => onNavigate('/chat-app')}
-              className="w-full py-3 rounded-full bg-emerald-400 hover:bg-emerald-300 text-black font-black text-sm shadow-xl transition-all cursor-pointer"
-            >
-              Launch Assistant →
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Google Sign-Up Academic Setup Modal (Level, Class, Course Picker) */}
       {googleSetupData && (

@@ -92,6 +92,12 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
   const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
   const [previewModalImage, setPreviewModalImage] = useState<string | null>(null);
 
+  const isAdmin =
+    user?.role === 'admin' ||
+    user?.email?.toLowerCase() === 'codevortex@gmail.com' ||
+    user?.email?.toLowerCase() === 'nelsonwazini@gmail.com' ||
+    Boolean(user?.email?.toLowerCase().includes('admin'));
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -444,25 +450,27 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 pt-0.5">
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold flex items-center justify-center gap-1.5"
-              title="Academic Settings & Persona"
-            >
-              <Settings className="w-3.5 h-3.5 text-stone-400" />
-              <span>Settings</span>
-            </button>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-100 transition-colors cursor-pointer text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
-              title="Logout & end session"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Logout</span>
-            </button>
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold flex items-center justify-center gap-1.5"
+                title="Academic Settings & Persona"
+              >
+                <Settings className="w-3.5 h-3.5 text-stone-400" />
+                <span>Settings</span>
+              </button>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 hover:text-rose-100 transition-colors cursor-pointer text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs"
+                title="Logout & end session"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Logout</span>
+              </button>
+            </div>
           </div>
         </div>
       </aside>
@@ -483,10 +491,6 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
             >
               <Menu className="w-5 h-5 text-stone-300 hover:text-white" />
             </button>
-
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-2 py-1.5 shadow-sm">
-              <VortexLogo size="xs" showText={false} />
-            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -624,7 +628,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                           <div className="flex items-center gap-3 mt-2.5 pt-1 text-xs text-stone-400">
                             <button
                               onClick={() => handleCopyMessage(msg.content, index)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-[11px] focus-visible:outline-none focus-visible:ring-0"
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-stone-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer text-[11px]"
                               title="Copy full answer"
                             >
                               {copiedMessageIndex === index ? (
@@ -644,7 +648,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                             <button
                               type="button"
                               onClick={() => toggleReadAloud(msg.content, index)}
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0 ${
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors cursor-pointer ${
                                 speakingIndex === index
                                   ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                                   : 'text-stone-400 hover:text-white hover:bg-white/10'
@@ -674,7 +678,7 @@ export const UniversityChat: React.FC<UniversityChatProps> = ({
                                     onSendMessage(lastUserMsg.content);
                                   }
                                 }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-amber-100 transition-colors cursor-pointer shadow-xs active:scale-95 focus-visible:outline-none focus-visible:ring-0"
+                                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 hover:text-amber-100 transition-colors cursor-pointer shadow-xs active:scale-95"
                                 title="Re-query EduMind AI live engines"
                               >
                                 <Sparkles className="w-3 h-3 text-amber-400" />

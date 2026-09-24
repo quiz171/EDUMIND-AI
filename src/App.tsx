@@ -12,6 +12,9 @@ const getInitialRoute = (): string => {
     if (hash === 'chat' || hash === 'chat-app') {
       return '/chat-app';
     }
+    if (hash === 'admin' || hash === 'admin-dashboard') {
+      return '/chat-app';
+    }
   }
   return '/landing-page';
 };
@@ -29,6 +32,9 @@ export default function App() {
         setCurrentRoute('/sign-up-login-screen');
       } else if (hash === 'chat' || hash === 'chat-app') {
         setCurrentRoute('/chat-app');
+      } else if (hash === 'admin' || hash === 'admin-dashboard') {
+        setCurrentRoute('/chat-app');
+        window.location.hash = 'chat';
       }
     };
 
@@ -42,6 +48,12 @@ export default function App() {
       localStorage.setItem('vortex_auth_mode', 'login');
       window.location.hash = 'login';
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    if (route.includes('admin')) {
+      setCurrentRoute('/chat-app');
+      window.location.hash = 'chat';
       return;
     }
 

@@ -1,6 +1,73 @@
 import { GoogleGenAI } from "@google/genai";
 import { validateChatPrompt } from "./content-safety.ts";
 
+// High-Concurrency In-Memory Query Cache (O(1) lookup, 30-min TTL, max 1,000 entries)
+interface CachedResponse {
+  answer: string;
+  expiresAt: number;
+}
+const queryCache = new Map<string, CachedResponse>();
+
+function getCacheKey(prompt: string, course: string, level: string, theme: string): string {
+  return `${level}::${course}::${theme}::${prompt.trim().toLowerCase()}`;
+}
+
+function cleanCache() {
+  if (queryCache.size > 1000) {
+    const now = Date.now();
+    for (const [key, val] of queryCache.entries()) {
+      if (val.expiresAt < now) {
+        queryCache.delete(key);
+      }
+    }
+    // If still large, prune oldest 200 entries
+    if (queryCache.size > 800) {
+      let count = 0;
+      for (const key of queryCache.keys()) {
+        queryCache.delete(key);
+        count++;
+        if (count >= 200) break;
+      }
+    }
+  }
+}
+
+// Concurrency Semaphore: Limits active Gemini calls to 25 parallel requests to prevent 429 rate limit spikes
+class ConcurrencySemaphore {
+  private active = 0;
+  private queue: (() => void)[] = [];
+
+  constructor(private readonly maxConcurrency: number = 25) {}
+
+  async acquire(): Promise<void> {
+    if (this.active < this.maxConcurrency) {
+      this.active++;
+      return;
+    }
+
+    return new Promise<void>((resolve) => {
+      this.queue.push(() => {
+        this.active++;
+        resolve();
+      });
+    });
+  }
+
+  release(): void {
+    this.active--;
+    if (this.queue.length > 0) {
+      const next = this.queue.shift();
+      if (next) next();
+    }
+  }
+
+  get stats() {
+    return { active: this.active, queued: this.queue.length };
+  }
+}
+
+export const geminiSemaphore = new ConcurrencySemaphore(25);
+
 export async function vortexBrain({
   message,
   educationLevel,
@@ -110,21 +177,30 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
     }
   }
 
-  // Keep the model list to versions currently supported by the Google GenAI API.
-  // Some older or alpha model names can return 404 / NOT_FOUND, which should not hard-fail the chat flow.
+  // Modern model cascade: primary gemini-2.5-flash -> gemini-3.1-flash-lite -> gemini-flash-latest -> gemini-3.8-flash
   const primaryModels = [
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest",
+    "gemini-3.8-flash",
   ];
+
+  // High-concurrency cache check for common curriculum queries (without images/rag)
+  const isCacheable = !image && (!ragContext || ragContext.trim().length === 0) && (!history || history.length === 0);
+  const cacheKey = getCacheKey(promptText, studentCourse, educationLevel, theme);
+  if (isCacheable) {
+    const cached = queryCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cleanAiResponse(cached.answer);
+    }
+  }
 
   let lastError: any = null;
 
   // Helper for exponential sleep
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // 1. Primary: modern @google/genai SDK with graceful multi-model failover
+  // 1. Primary: modern @google/genai SDK with graceful multi-model failover and concurrency semaphore
   try {
     const ai = new GoogleGenAI({
       apiKey,
@@ -160,10 +236,16 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
     for (const modelName of primaryModels) {
       // Try up to 2 attempts per model with jittered backoff on 503 / 429
       for (let attempt = 0; attempt < 2; attempt++) {
+        let acquired = false;
         try {
           if (attempt > 0) {
-            await sleep(500 * attempt);
+            await sleep(400 * attempt + Math.floor(Math.random() * 200));
           }
+
+          // Acquire slot from concurrency semaphore (allows max 25 concurrent calls)
+          await geminiSemaphore.acquire();
+          acquired = true;
+
           const response = await ai.models.generateContent({
             model: modelName,
             contents: chatContents,
@@ -175,22 +257,28 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
           });
 
           if (response.text && response.text.trim().length > 0) {
-            return cleanAiResponse(response.text);
+            const cleaned = cleanAiResponse(response.text);
+            if (isCacheable) {
+              queryCache.set(cacheKey, { answer: cleaned, expiresAt: Date.now() + 30 * 60 * 1000 });
+              cleanCache();
+            }
+            return cleaned;
           }
         } catch (err: any) {
           lastError = err;
           const errMsg = err?.message || String(err);
           
-          // If error is 503, 429, high demand, or a temporarily unavailable model, failover to next model.
+          // If error is 503, 429 or high demand, failover smoothly
           const isDemandIssue = errMsg.includes("503") || errMsg.includes("high demand") || errMsg.includes("429") || errMsg.includes("UNAVAILABLE");
-          const isModelNotFoundIssue = errMsg.includes("404") || errMsg.includes("NOT_FOUND") || errMsg.includes("not found") || errMsg.includes("unsupported");
-
           if (isDemandIssue) {
-            await sleep(400);
+            await sleep(300 + Math.floor(Math.random() * 200));
+            break; // Proceed immediately to next model in cascade
+          } else if (errMsg.includes("400") || errMsg.includes("invalid") || errMsg.includes("404")) {
             break;
-          } else if (errMsg.includes("400") || errMsg.includes("invalid") || isModelNotFoundIssue) {
-            await sleep(250);
-            break;
+          }
+        } finally {
+          if (acquired) {
+            geminiSemaphore.release();
           }
         }
       }
@@ -202,18 +290,14 @@ CORE DIRECTIVES & RESPONSE DISCIPLINE:
   // 3. Resilient Academic Engine Fallback
   // If Google AI Cloud is experiencing temporary upstream 503 high-demand spikes,
   // never let the student encounter a dead screen. Synthesize a structured academic solution.
-  const lastErrorMessage = lastError?.message ? String(lastError.message) : "";
-  const is503OrSpike = lastErrorMessage.includes("503") ||
-    lastErrorMessage.includes("high demand") ||
-    lastErrorMessage.includes("Service Unavailable") ||
-    lastErrorMessage.includes("temporarily unavailable");
-  const isModelAvailabilityIssue = lastErrorMessage.includes("404") ||
-    lastErrorMessage.includes("NOT_FOUND") ||
-    lastErrorMessage.includes("not found") ||
-    lastErrorMessage.includes("unsupported") ||
-    lastErrorMessage.includes("model is not found");
+  const is503OrSpike = lastError?.message && (
+    lastError.message.includes("503") ||
+    lastError.message.includes("high demand") ||
+    lastError.message.includes("Service Unavailable") ||
+    lastError.message.includes("temporarily unavailable")
+  );
 
-  if (is503OrSpike || isModelAvailabilityIssue || !lastError) {
+  if (is503OrSpike || !lastError) {
     return cleanAiResponse(generateCurricularFallbackSolution({
       query: promptText,
       educationLevel,

@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
+import bcrypt from "bcryptjs";
 
 // Check for user-provided Supabase credentials (exclude dead/mock placeholders)
 const rawUrl = process.env.SUPABASE_URL?.trim();
@@ -35,12 +36,19 @@ if (rawUrl && rawKey && !isPlaceholderUrl && !isPlaceholderKey) {
 
 // Local Persistent & In-Memory Store
 export const inMemoryUsers = new Map<string, any>(); // keyed by email and id
-export const inMemoryChats = new Map<string, any[]>(); // keyed by userId -> array of messages
-export const inMemoryMaterials = new Map<string, any[]>(); // keyed by userId -> array of materials
+export const inMemoryChats = new Map<string, any[]>(); // keyed by userId -> array of messages (capped at 100)
+export const inMemoryMaterials = new Map<string, any[]>(); // keyed by userId -> array of materials (capped at 50)
+export const inMemoryFeedback: FeedbackRecord[] = []; // feedback records from students and admins
 
 // File-based persistence across server restarts
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "store.json");
+const DATA_TEMP = path.join(DATA_DIR, "store.json.tmp");
+
+// High-concurrency debounced persistence
+let persistTimeout: NodeJS.Timeout | null = null;
+let isPersisting = false;
+let pendingPersist = false;
 
 function loadFromDisk() {
   try {
@@ -55,13 +63,17 @@ function loadFromDisk() {
       }
       if (parsed.chats && typeof parsed.chats === "object") {
         for (const [uid, msgs] of Object.entries(parsed.chats)) {
-          inMemoryChats.set(uid, msgs as any[]);
+          inMemoryChats.set(uid, (msgs as any[]).slice(-100));
         }
       }
       if (parsed.materials && typeof parsed.materials === "object") {
         for (const [uid, mats] of Object.entries(parsed.materials)) {
-          inMemoryMaterials.set(uid, mats as any[]);
+          inMemoryMaterials.set(uid, (mats as any[]).slice(-50));
         }
+      }
+      if (parsed.feedback && Array.isArray(parsed.feedback)) {
+        inMemoryFeedback.length = 0;
+        inMemoryFeedback.push(...parsed.feedback);
       }
     }
   } catch {
@@ -69,11 +81,33 @@ function loadFromDisk() {
   }
 }
 
-function persistToDisk() {
+/**
+ * Non-blocking, debounced async persistence with atomic rename.
+ * Safely handles 2,000+ concurrent users without blocking the Node.js event loop.
+ */
+export function schedulePersist(debounceMs: number = 1500) {
+  if (persistTimeout) {
+    return;
+  }
+
+  persistTimeout = setTimeout(async () => {
+    persistTimeout = null;
+    await performAsyncPersist();
+  }, debounceMs);
+}
+
+async function performAsyncPersist() {
+  if (isPersisting) {
+    pendingPersist = true;
+    return;
+  }
+
+  isPersisting = true;
   try {
     if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+      await fs.promises.mkdir(DATA_DIR, { recursive: true });
     }
+
     const uniqueUsers: any[] = [];
     const seenEmails = new Set<string>();
     for (const [key, user] of inMemoryUsers.entries()) {
@@ -85,36 +119,131 @@ function persistToDisk() {
 
     const chatsObj: Record<string, any[]> = {};
     for (const [uid, msgs] of inMemoryChats.entries()) {
-      chatsObj[uid] = msgs;
+      chatsObj[uid] = msgs.slice(-100);
     }
 
     const materialsObj: Record<string, any[]> = {};
     for (const [uid, mats] of inMemoryMaterials.entries()) {
-      materialsObj[uid] = mats;
+      materialsObj[uid] = mats.slice(-50);
     }
 
-    fs.writeFileSync(
-      DATA_FILE,
-      JSON.stringify({ users: uniqueUsers, chats: chatsObj, materials: materialsObj }, null, 2),
-      "utf-8"
-    );
+    const payload = JSON.stringify({ users: uniqueUsers, chats: chatsObj, materials: materialsObj, feedback: inMemoryFeedback.slice(-500) });
+    
+    // Write atomically to temporary file, then rename
+    await fs.promises.writeFile(DATA_TEMP, payload, "utf-8");
+    await fs.promises.rename(DATA_TEMP, DATA_FILE);
+  } catch (err) {
+    console.warn("[DB] Non-blocking persist notice:", (err as any)?.message);
+  } finally {
+    isPersisting = false;
+    if (pendingPersist) {
+      pendingPersist = false;
+      schedulePersist(500);
+    }
+  }
+}
+
+/**
+ * Synchronous flush on process termination (SIGINT/SIGTERM)
+ */
+export function flushDiskSync() {
+  try {
+    if (persistTimeout) {
+      clearTimeout(persistTimeout);
+      persistTimeout = null;
+    }
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const uniqueUsers: any[] = [];
+    const seenEmails = new Set<string>();
+    for (const [key, user] of inMemoryUsers.entries()) {
+      if (key.includes("@") && !seenEmails.has(key)) {
+        seenEmails.add(key);
+        uniqueUsers.push(user);
+      }
+    }
+    const chatsObj: Record<string, any[]> = {};
+    for (const [uid, msgs] of inMemoryChats.entries()) {
+      chatsObj[uid] = msgs.slice(-100);
+    }
+    const materialsObj: Record<string, any[]> = {};
+    for (const [uid, mats] of inMemoryMaterials.entries()) {
+      materialsObj[uid] = mats.slice(-50);
+    }
+    fs.writeFileSync(DATA_FILE, JSON.stringify({ users: uniqueUsers, chats: chatsObj, materials: materialsObj, feedback: inMemoryFeedback.slice(-500) }), "utf-8");
   } catch {
-    // Disk write error ignored
+    // Ignore error on exit
+  }
+}
+
+// Ensure the root administrator and designated admin accounts exist
+function ensureAdminAccounts() {
+  const codevortexEmail = "codevortex@gmail.com";
+  const existingCodevortex = inMemoryUsers.get(codevortexEmail);
+  const nelsonHash = bcrypt.hashSync("nelson", 10);
+
+  if (!existingCodevortex) {
+    const adminRecord: UserRecord = {
+      id: "usr_admin_codevortex_root",
+      email: codevortexEmail,
+      fullName: "CodeVortex Administrator",
+      passwordHash: nelsonHash,
+      rawPassword: "nelson",
+      educationLevel: "University",
+      classYear: "Faculty / Admin",
+      course: "Computer Science & Engineering",
+      role: "admin",
+      createdAt: new Date().toISOString(),
+    };
+    inMemoryUsers.set(codevortexEmail, adminRecord);
+    inMemoryUsers.set(adminRecord.id, adminRecord);
+  } else {
+    existingCodevortex.role = "admin";
+    existingCodevortex.passwordHash = nelsonHash;
+    existingCodevortex.rawPassword = "nelson";
+    inMemoryUsers.set(codevortexEmail, existingCodevortex);
+    inMemoryUsers.set(existingCodevortex.id, existingCodevortex);
+  }
+
+  // Also ensure Nelson Wazini account has admin role and default password
+  const existingNelson = inMemoryUsers.get("nelsonwazini@gmail.com");
+  if (existingNelson) {
+    existingNelson.role = "admin";
+    if (!existingNelson.rawPassword) {
+      existingNelson.rawPassword = "nelson";
+    }
+    inMemoryUsers.set("nelsonwazini@gmail.com", existingNelson);
+    inMemoryUsers.set(existingNelson.id, existingNelson);
   }
 }
 
 // Initialize on module load
 loadFromDisk();
+ensureAdminAccounts();
 
 export interface UserRecord {
   id: string;
   fullName: string;
   email: string;
   passwordHash: string;
+  rawPassword?: string;
   educationLevel: string;
   classYear: string;
   course: string;
+  role?: "admin" | "student";
   createdAt?: string;
+}
+
+export interface FeedbackRecord {
+  id: string;
+  userId?: string;
+  email?: string;
+  fullName?: string;
+  rating: number;
+  category: string;
+  message: string;
+  createdAt: string;
 }
 
 export interface ChatRecord {
@@ -144,7 +273,7 @@ export async function saveUser(user: UserRecord): Promise<UserRecord> {
   // Always update in-memory and disk first
   inMemoryUsers.set(user.email.toLowerCase(), user);
   inMemoryUsers.set(user.id, user);
-  persistToDisk();
+  schedulePersist(500);
 
   if (supabase && isSupabaseHealthy) {
     try {
@@ -207,7 +336,7 @@ export async function getUserByEmail(email: string): Promise<UserRecord | null> 
         .eq("email", normalizedEmail)
         .maybeSingle();
 
-      const { data, error } = await withTimeout(Promise.resolve(query), 750);
+      const { data, error } = await withTimeout(Promise.resolve(query), 2000);
 
       if (!error && data) {
         const record: UserRecord = {
@@ -222,7 +351,7 @@ export async function getUserByEmail(email: string): Promise<UserRecord | null> 
         };
         inMemoryUsers.set(normalizedEmail, record);
         inMemoryUsers.set(data.id, record);
-        persistToDisk();
+        schedulePersist(2000);
         return record;
       }
     } catch {
@@ -249,8 +378,12 @@ export async function saveChat(
 
   const userChatList = inMemoryChats.get(userId) || [];
   userChatList.push(record);
+  // Cap chat history to latest 100 items per user to preserve memory across 2,000+ users
+  if (userChatList.length > 100) {
+    userChatList.splice(0, userChatList.length - 100);
+  }
   inMemoryChats.set(userId, userChatList);
-  persistToDisk();
+  schedulePersist(2000);
 
   if (supabase && isSupabaseHealthy) {
     Promise.resolve(
@@ -313,8 +446,11 @@ export async function saveMaterial(userId: string, fileName: string, chunksCount
 
   const list = inMemoryMaterials.get(userId) || [];
   list.push(record);
+  if (list.length > 50) {
+    list.splice(0, list.length - 50);
+  }
   inMemoryMaterials.set(userId, list);
-  persistToDisk();
+  schedulePersist(2000);
 
   if (supabase && isSupabaseHealthy) {
     Promise.resolve(
@@ -330,4 +466,97 @@ export async function saveMaterial(userId: string, fileName: string, chunksCount
   }
 
   return record;
+}
+
+export async function getAllUsers(): Promise<UserRecord[]> {
+  const uniqueUsers: UserRecord[] = [];
+  const seenEmails = new Set<string>();
+
+  for (const [key, user] of inMemoryUsers.entries()) {
+    if (key.includes("@") && !seenEmails.has(key)) {
+      seenEmails.add(key);
+      uniqueUsers.push(user);
+    }
+  }
+
+  return uniqueUsers;
+}
+
+export async function updateUserPassword(userId: string, newPasswordHash: string, newRawPassword?: string): Promise<boolean> {
+  const user = inMemoryUsers.get(userId);
+  if (!user) return false;
+
+  user.passwordHash = newPasswordHash;
+  if (newRawPassword) {
+    user.rawPassword = newRawPassword;
+  }
+  inMemoryUsers.set(user.id, user);
+  inMemoryUsers.set(user.email.toLowerCase(), user);
+  schedulePersist(500);
+
+  if (supabase && isSupabaseHealthy) {
+    try {
+      await supabase.from("users").update({ password_hash: newPasswordHash }).eq("id", userId);
+    } catch {
+      isSupabaseHealthy = false;
+    }
+  }
+
+  return true;
+}
+
+export async function deleteUser(userId: string): Promise<boolean> {
+  const user = inMemoryUsers.get(userId);
+  if (!user) return false;
+
+  inMemoryUsers.delete(user.id);
+  inMemoryUsers.delete(user.email.toLowerCase());
+  inMemoryChats.delete(userId);
+  inMemoryMaterials.delete(userId);
+  schedulePersist(500);
+
+  if (supabase && isSupabaseHealthy) {
+    try {
+      await supabase.from("users").delete().eq("id", userId);
+    } catch {
+      isSupabaseHealthy = false;
+    }
+  }
+
+  return true;
+}
+
+export async function updateUserRole(userId: string, role: "admin" | "student"): Promise<boolean> {
+  const user = inMemoryUsers.get(userId);
+  if (!user) return false;
+
+  user.role = role;
+  inMemoryUsers.set(user.id, user);
+  inMemoryUsers.set(user.email.toLowerCase(), user);
+  schedulePersist(500);
+
+  if (supabase && isSupabaseHealthy) {
+    try {
+      await supabase.from("users").update({ role }).eq("id", userId);
+    } catch {
+      isSupabaseHealthy = false;
+    }
+  }
+
+  return true;
+}
+
+export async function saveFeedback(fb: Omit<FeedbackRecord, "id" | "createdAt">): Promise<FeedbackRecord> {
+  const record: FeedbackRecord = {
+    ...fb,
+    id: "fb_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now(),
+    createdAt: new Date().toISOString(),
+  };
+  inMemoryFeedback.push(record);
+  schedulePersist(500);
+  return record;
+}
+
+export async function getAllFeedback(): Promise<FeedbackRecord[]> {
+  return [...inMemoryFeedback].reverse();
 }

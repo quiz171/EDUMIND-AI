@@ -2,8 +2,16 @@ import mammoth from "mammoth";
 import * as pdfParseModule from "pdf-parse";
 import { GoogleGenAI } from "@google/genai";
 
-// Global in-memory storage for uploaded document chunks
+// Global in-memory storage for uploaded document chunks (bounded to 3,000 chunks to prevent memory bloat)
 export const globalChunks: string[] = [];
+
+export function appendChunks(newChunks: string[]) {
+  if (!newChunks || newChunks.length === 0) return;
+  globalChunks.push(...newChunks);
+  if (globalChunks.length > 3000) {
+    globalChunks.splice(0, globalChunks.length - 3000);
+  }
+}
 
 export function chunkText(text: string, size: number = 1000, overlap: number = 100): string[] {
   if (!text || text.trim().length === 0) return [];

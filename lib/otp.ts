@@ -1,9 +1,11 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { promises as dns } from "node:dns";
 
 export interface PendingRegistration {
   fullName: string;
   email: string;
   passwordHash: string;
+  rawPassword?: string;
   educationLevel: string;
   classYear: string;
   course: string;
@@ -91,8 +93,31 @@ export function generateOtpCode(): string {
 export async function createAndSendOtp(
   email: string,
   pendingUserData: PendingRegistration
-): Promise<{ success: boolean; previewOtp: string; message: string; expiresInSeconds: number }> {
+): Promise<{ success: boolean; message: string; expiresInSeconds: number }> {
   const cleanEmail = email.toLowerCase().trim();
+  const domain = cleanEmail.split("@")[1];
+  if (!domain) {
+    throw new Error("Please provide a valid email address");
+  }
+
+  try {
+    const mailRecords = await dns.resolveMx(domain);
+    const hasDeliverableMailServer = mailRecords.some(
+      (record) => Boolean(record.exchange && record.exchange !== ".")
+    );
+    if (!hasDeliverableMailServer) {
+      throw new Error("That email domain cannot receive messages. Please use a real email address.");
+    }
+  } catch (err: any) {
+    if (err?.message?.includes("cannot receive messages")) throw err;
+    throw new Error("That email domain cannot receive messages. Please use a real email address.");
+  }
+
+  const transporter = getMailTransporter();
+  if (!transporter) {
+    throw new Error("Email verification is temporarily unavailable. Please try again later.");
+  }
+
   const code = generateOtpCode();
   const now = Date.now();
   const expiresAt = now + OTP_EXPIRY_MS;
@@ -106,21 +131,9 @@ export async function createAndSendOtp(
     pendingUserData,
   };
 
-  pendingOtps.set(cleanEmail, record);
-
-  // Prominently log to server console for instant observability & development
-  console.log(`\n======================================================`);
-  console.log(`[AUTH OTP] 📧 Verification code for: ${cleanEmail}`);
-  console.log(`[AUTH OTP] 🔑 CODE: ${code}`);
-  console.log(`[AUTH OTP] ⏳ Valid for 10 minutes until: ${new Date(expiresAt).toLocaleTimeString()}`);
-  console.log(`======================================================\n`);
-
-  // Dispatch email in the background so a slow SMTP server cannot block signup.
-  const transporter = getMailTransporter();
-
-  if (transporter) {
+  try {
     const sender = process.env.EMAIL_FROM || process.env.SMTP_USER || "noreply@edumind.ng";
-    void transporter.sendMail({
+    await transporter.sendMail({
         from: `"EduMind AI" <${sender}>`,
         to: cleanEmail,
         subject: `${code} is your EduMind AI verification code`,
@@ -143,17 +156,17 @@ export async function createAndSendOtp(
             <p style="color: #52525b; font-size: 11px; margin-top: 24px;">© ${new Date().getFullYear()} EduMind AI Academic Intelligence Platform</p>
           </div>
         `,
-      }).then(() => {
-        console.log(`[AUTH OTP] ✅ Email successfully delivered to ${cleanEmail}`);
-      }).catch((mailErr) => {
-        console.warn(`[AUTH OTP] ⚠️ SMTP delivery failed; use the displayed OTP fallback:`, mailErr);
       });
+  } catch (mailErr) {
+    console.warn(`[AUTH OTP] SMTP delivery failed for ${cleanEmail}:`, mailErr);
+    throw new Error("We could not send the verification code. Please check the email address and try again.");
   }
+
+  pendingOtps.set(cleanEmail, record);
 
   return {
     success: true,
-    previewOtp: code,
-    message: `Verification code generated for ${cleanEmail}`,
+    message: `Verification code sent to ${cleanEmail}`,
     expiresInSeconds: 600,
   };
 }
@@ -163,7 +176,7 @@ export async function createAndSendOtp(
  */
 export async function resendOtp(
   email: string
-): Promise<{ success: boolean; error?: string; previewOtp?: string; message?: string }> {
+): Promise<{ success: boolean; error?: string; message?: string }> {
   const cleanEmail = email.toLowerCase().trim();
   const existing = pendingOtps.get(cleanEmail);
 
@@ -188,7 +201,6 @@ export async function resendOtp(
   const result = await createAndSendOtp(cleanEmail, existing.pendingUserData);
   return {
     success: true,
-    previewOtp: result.previewOtp,
     message: `A fresh 6-digit code has been sent to ${cleanEmail}`,
   };
 }
